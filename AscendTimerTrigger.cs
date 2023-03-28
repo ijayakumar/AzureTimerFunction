@@ -9,19 +9,16 @@ using System.Net.Mail;
 using System.Text;
 using System.Threading.Tasks;
 using Azure;
-using Azure.Storage.Blobs;
 using Azure.Storage.Files.Shares;
 using Azure.Storage.Files.Shares.Models;
 using ExcelDataReader;
 using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Auth;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.File;
-using Newtonsoft.Json;
 
 namespace Ascend
 {
