@@ -35,7 +35,7 @@ namespace Ascend
                 .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
                 .AddEnvironmentVariables()
                 .Build();
-
+            // Azure Storage Account details for files
             string AccountName = Config["StorageAccountName"];
             string AccountKey = Config["StorageAccountKey"];
             string SourceConnection = Config["SourceShareConnectionString"];
@@ -44,18 +44,18 @@ namespace Ascend
             string DestinationConnection = Config["DestinationShareConnectionString"];
             string DestinationShare = Config["DestinationShareName"];
             string DestinationDirectory = Config["DestinationFilePath"];
-
+            // Blob container for Log
             string BlobContainerName = Config["BlobContainerName"];
             string BlobName = Config["BlobName"];
-
+            // Azure http function for fetching title
             string TitleFunctionAPI = Config["TitleFunctionAPI"];
-            
+            // Email configuration for sending email
             string EmailFromAddress = Config["EmailFromAddress"];
             string EmailToAddress = Config["EmailToAddress"];
             string EmailSubject = Config["EmailSubject"];
             string SMTPClient = Config["SMTPClient"];
             string EmailPassword = Config["EmailPassword"];
-
+            // Boolean flag to enable/disable CSV file processing
             Boolean CSVEnabled = false;
             if (Config["CSVEnabled"].Equals("True"))
             {
@@ -65,54 +65,72 @@ namespace Ascend
             // Build Blob Client Object for logging
             Task<CloudBlockBlob> BlobLogTask = GetBlobClient(SourceConnection, BlobContainerName, BlobName);
             CloudBlockBlob BlobLog = await BlobLogTask;
-
+            // Get all files from given fileshare directory
             Task<List<string>> FileListTask = GetAllFiles(SourceConnection, SourceShare, SourceDirectory);
             List<string> fileList = await FileListTask;
+            // Reference Counter
             int Count = 0;
             var ExcelSupportedExtn = new List<string>();
             ExcelSupportedExtn.Add(".XLSX");
             ExcelSupportedExtn.Add(".XLS");
-
+            // Iterate files one by one
             foreach (string fileName in fileList)
             {
                 Count++;
+                // Fetching file extension to check for excel and csv files
                 string fileExtension = Path.GetExtension(fileName);
+                // if CSV file and enabled
                 if (fileExtension.Equals(".CSV", StringComparison.OrdinalIgnoreCase) && CSVEnabled)
                 {
+                    // Read the last record of CSV file
                     string fileContent = ReadLastLineFromAzureFileShare(SourceConnection, SourceShare, SourceDirectory, fileName).GetAwaiter().GetResult();
+                    // Log the detail in centrail log of Blob container
                     await LogIt(BlobLog, $"{DateTime.Now} CSV File, Reference number is {Count}, Last Record is {fileContent}");
                     // Copy file from Server 1 to 2
                     string SourceFileDirPath = SourceDirectory + "/" + fileName;
                     string DestinationFileDirPath = DestinationDirectory + "/" + fileName;
+                    // Copy the file from filer server 1 to server 2
                     Boolean Copied = CopyFileAsync(SourceConnection, SourceShare, SourceFileDirPath, DestinationConnection, DestinationShare, DestinationFileDirPath).GetAwaiter().GetResult();
+                    // If file is copied, delete the file from file server 1
                     if (Copied)
                     {
                         DeleteFileAsync(SourceConnection, SourceShare, SourceDirectory, fileName).GetAwaiter().GetResult();
                     }
+                    // Get title from Azure http function
                     Task<string> TitleValue = GetTitle(Count, TitleFunctionAPI);
                     string Title = await TitleValue;
+                    // Notify via email about the file transfer
                     await FileTransferEmailNotify(Count, Title, SMTPClient, EmailFromAddress, EmailPassword, EmailToAddress, EmailSubject);
                 }
                 else if (ExcelSupportedExtn.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
                 {
+                    // Read the last record of Excel file
                     string fileContent = ReadLastRowExcelFromAzureFileShare(AccountName, AccountKey, SourceShare, SourceDirectory, fileName).GetAwaiter().GetResult();
+                    // Log the detail in centrail log of Blob container
                     await LogIt(BlobLog, $"{DateTime.Now} Excel File, Reference number is {Count}, Last Record is {fileContent}");
                     // Copy file from Server 1 to 2
                     string SourceFileDirPath = SourceDirectory + "/" + fileName;
                     string DestinationFileDirPath = DestinationDirectory + "/" + fileName;
+                    // Copy the file from filer server 1 to server 2
                     Boolean Copied = CopyFileAsync(SourceConnection, SourceShare, SourceFileDirPath, DestinationConnection, DestinationShare, DestinationFileDirPath).GetAwaiter().GetResult();
+                    // If file is copied, delete the file from file server 1
                     if (Copied)
                     {
                         DeleteFileAsync(SourceConnection, SourceShare, SourceDirectory, fileName).GetAwaiter().GetResult();
                     }
+                    // Get title from Azure http function
                     Task<string> TitleValue = GetTitle(Count, TitleFunctionAPI);
                     string Title = await TitleValue;
+                    // Notify via email about the file transfer
                     await FileTransferEmailNotify(Count, Title, SMTPClient, EmailFromAddress, EmailPassword, EmailToAddress, EmailSubject);
                 }
 
             }
         }
 
+        //-------------------------------------------------
+        // Get the list of Blog Log file object
+        //-------------------------------------------------
         private async Task<CloudBlockBlob> GetBlobClient(string sourceConnection, string blobContainerName, string blobName)
         {
             // Create a BlobClient to connect to the Azure Blob container and Blob
@@ -133,12 +151,18 @@ namespace Ascend
             return blob;
         }
 
+        //-------------------------------------------------
+        // Log the string in Blob log
+        //-------------------------------------------------
         private async Task LogIt(CloudBlockBlob blob, string text)
         {
             string contents = blob.DownloadTextAsync().Result;
             await blob.UploadTextAsync(contents + text + "\n");
         }
 
+        //-------------------------------------------------
+        // Read the last line from text/csv file
+        //-------------------------------------------------
         private static async Task<string> ReadLastLineFromAzureFileShare(string connectionString, string shareName, string directoryName, string fileName)
         {
             ShareClient shareClient = new ShareClient(connectionString, shareName);
@@ -164,6 +188,9 @@ namespace Ascend
             return lastLine;
         }
 
+        //-------------------------------------------------
+        // Read the last row of excel file
+        //-------------------------------------------------
         private static async Task<string> ReadLastRowExcelFromAzureFileShare(string accountName, string accountKey, string fileShareName, string directoryName, string fileName)
         {
 
@@ -233,6 +260,9 @@ namespace Ascend
             return LastRowString;
         }
 
+        //-------------------------------------------------
+        // Get the title value from Azure http function
+        //-------------------------------------------------
         private async Task<string> GetTitle(int ReferenceNum, string TitleFunctionAPI)
         {
             // Create an instance of HttpClient
@@ -258,9 +288,9 @@ namespace Ascend
             }
         }
 
-        //-------------------------------------------------
-        // Get the list of files from a directory
-        //-------------------------------------------------
+        //----------------------------------------------------------
+        // Get the list of files from a Azure File server directory
+        //----------------------------------------------------------
         private async Task<List<string>> GetAllFiles(string sourceConnection, string sourceShare, string sourceDirectory)
         {
             ShareClient share = new ShareClient(sourceConnection, sourceShare);
@@ -277,7 +307,7 @@ namespace Ascend
         }
 
         //-------------------------------------------------
-        // Copy file within a directory
+        // Copy file from file server 1 to server 2
         //-------------------------------------------------
         private async Task<Boolean> CopyFileAsync(string sourceConnection, string sourceShare, string sourceFilePath, string destinationConnection, string destinationShare, string destFilePath)
         {
@@ -303,6 +333,9 @@ namespace Ascend
             return CopySuccess;
         }
 
+        //-------------------------------------------------
+        // Delete a file from Azure file server
+        //-------------------------------------------------
         private async Task DeleteFileAsync(string connectionString, string shareName, string directoryName, string fileName)
         {
             // Initialize the share client
@@ -317,6 +350,9 @@ namespace Ascend
             Response response = await fileClient.DeleteAsync();
         }
 
+        //-------------------------------------------------
+        // Notify via email about the file transfer
+        //-------------------------------------------------
         private async Task<Boolean> FileTransferEmailNotify(int RefNum, string Title, string SMTPClient, string EmailFromAddress, string EmailPassword, string EmailToAddress, string EmailSubject)
         {
             Boolean MailSent = false;
