@@ -36,8 +36,6 @@ namespace Ascend
                 .AddEnvironmentVariables()
                 .Build();
 
-            AscendTimerTrigger ATT = new AscendTimerTrigger();
-
             string AccountName = Config["StorageAccountName"];
             string AccountKey = Config["StorageAccountKey"];
             string SourceConnection = Config["SourceShareConnectionString"];
@@ -46,10 +44,21 @@ namespace Ascend
             string DestinationConnection = Config["DestinationShareConnectionString"];
             string DestinationShare = Config["DestinationShareName"];
             string DestinationDirectory = Config["DestinationFilePath"];
+
             string BlobContainerName = Config["BlobContainerName"];
             string BlobName = Config["BlobName"];
+
+            string TitleFunctionAPI = Config["TitleFunctionAPI"];
+            
+            string EmailFromAddress = Config["EmailFromAddress"];
+            string EmailToAddress = Config["EmailToAddress"];
+            string EmailSubject = Config["EmailSubject"];
+            string SMTPClient = Config["SMTPClient"];
+            string EmailPassword = Config["EmailPassword"];
+
             Boolean CSVEnabled = false;
-            if (Config["CSVEnabled"].Equals("True")){
+            if (Config["CSVEnabled"].Equals("True"))
+            {
                 CSVEnabled = true;
             }
 
@@ -80,9 +89,9 @@ namespace Ascend
                     {
                         DeleteFileAsync(SourceConnection, SourceShare, SourceDirectory, fileName).GetAwaiter().GetResult();
                     }
-                    Task<string> TitleValue = GetTitle(Count);
+                    Task<string> TitleValue = GetTitle(Count, TitleFunctionAPI);
                     string Title = await TitleValue;
-                    await SendEmail(Count,Title);
+                    await FileTransferEmailNotify(Count, Title, SMTPClient, EmailFromAddress, EmailPassword, EmailToAddress, EmailSubject);
                 }
                 else if (ExcelSupportedExtn.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
                 {
@@ -96,15 +105,12 @@ namespace Ascend
                     {
                         DeleteFileAsync(SourceConnection, SourceShare, SourceDirectory, fileName).GetAwaiter().GetResult();
                     }
-                    Task<string> TitleValue = GetTitle(Count);
+                    Task<string> TitleValue = GetTitle(Count, TitleFunctionAPI);
                     string Title = await TitleValue;
-                    await SendEmail(Count,Title);
+                    await FileTransferEmailNotify(Count, Title, SMTPClient, EmailFromAddress, EmailPassword, EmailToAddress, EmailSubject);
                 }
 
             }
-
-            //ATT.CopyFileAsync(SourceConnection, SourceShare, SourceDirectory, DestinationConnection, DestinationShare, DestinationDirectory).GetAwaiter().GetResult();
-            //log.LogInformation($"Copy File Sync is completed at: {DateTime.Now}");
         }
 
         private async Task<CloudBlockBlob> GetBlobClient(string sourceConnection, string blobContainerName, string blobName)
@@ -133,7 +139,7 @@ namespace Ascend
             await blob.UploadTextAsync(contents + text + "\n");
         }
 
-        public static async Task<string> ReadLastLineFromAzureFileShare(string connectionString, string shareName, string directoryName, string fileName)
+        private static async Task<string> ReadLastLineFromAzureFileShare(string connectionString, string shareName, string directoryName, string fileName)
         {
             ShareClient shareClient = new ShareClient(connectionString, shareName);
             ShareDirectoryClient directoryClient = shareClient.GetDirectoryClient(directoryName);
@@ -158,7 +164,7 @@ namespace Ascend
             return lastLine;
         }
 
-        public static async Task<string> ReadLastRowExcelFromAzureFileShare(string accountName, string accountKey, string fileShareName, string directoryName, string fileName)
+        private static async Task<string> ReadLastRowExcelFromAzureFileShare(string accountName, string accountKey, string fileShareName, string directoryName, string fileName)
         {
 
             // Create a CloudStorageAccount object with the account name and account key or connection string of your Azure Storage account.
@@ -227,13 +233,13 @@ namespace Ascend
             return LastRowString;
         }
 
-        private async Task<string> GetTitle(int ReferenceNum)
+        private async Task<string> GetTitle(int ReferenceNum, string TitleFunctionAPI)
         {
             // Create an instance of HttpClient
             using (var httpClient = new HttpClient())
             {
                 // Construct the API URL with the parameter value
-                var apiUrl = $"https://ascend-http-function.azurewebsites.net/api/title?refCounter={ReferenceNum}";
+                var apiUrl = $"{TitleFunctionAPI}{ReferenceNum}";
 
                 // Call the GET API with the parameter and get the response
                 var response = await httpClient.GetAsync(apiUrl);
@@ -273,7 +279,7 @@ namespace Ascend
         //-------------------------------------------------
         // Copy file within a directory
         //-------------------------------------------------
-        public async Task<Boolean> CopyFileAsync(string sourceConnection, string sourceShare, string sourceFilePath, string destinationConnection, string destinationShare, string destFilePath)
+        private async Task<Boolean> CopyFileAsync(string sourceConnection, string sourceShare, string sourceFilePath, string destinationConnection, string destinationShare, string destFilePath)
         {
 
             // Get a reference to the file we created previously
@@ -297,7 +303,7 @@ namespace Ascend
             return CopySuccess;
         }
 
-        public async Task DeleteFileAsync(string connectionString, string shareName, string directoryName, string fileName)
+        private async Task DeleteFileAsync(string connectionString, string shareName, string directoryName, string fileName)
         {
             // Initialize the share client
             ShareServiceClient shareServiceClient = new ShareServiceClient(connectionString);
@@ -311,23 +317,19 @@ namespace Ascend
             Response response = await fileClient.DeleteAsync();
         }
 
-        private async Task<Boolean> SendEmail(int RefNum,string Title)
+        private async Task<Boolean> FileTransferEmailNotify(int RefNum, string Title, string SMTPClient, string EmailFromAddress, string EmailPassword, string EmailToAddress, string EmailSubject)
         {
-            // Set up email details
             Boolean MailSent = false;
-            string fromAddress = "jayakumar.inbaraj@yahoo.com";
-            string toAddress = "jayakumar.inbaraj@walmart.com";
-            string subject = "Email notification for ASCEND Capstone";
             string body = $"<html><body><h4>Hi</h4><h4>Please find below the details related to file processing and transfer.</h4><p><b>Reference Counter: </b>{RefNum}</p><p><b>Title: </b>{Title}</p><p><b>Date and Time: </b>{DateTime.Now}</p><p><i>--------------------------System Generated Email--------------------------</i></p></body></html>";
 
             // Create email message
-            MailMessage message = new MailMessage(fromAddress, toAddress, subject, body);
+            MailMessage message = new MailMessage(EmailFromAddress, EmailToAddress, EmailSubject, body);
             message.IsBodyHtml = true;
 
             // Set up SMTP client
-            SmtpClient client = new SmtpClient("smtp.mail.yahoo.com");
+            SmtpClient client = new SmtpClient(SMTPClient);
             client.Port = 587;
-            client.Credentials = new NetworkCredential("jayakumar.inbaraj@yahoo.com", "fngwhfiimpearshb");
+            client.Credentials = new NetworkCredential(EmailFromAddress, EmailPassword);
             client.EnableSsl = true;
             client.DeliveryMethod = SmtpDeliveryMethod.Network;
             client.UseDefaultCredentials = false;
